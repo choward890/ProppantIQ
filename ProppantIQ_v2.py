@@ -9,6 +9,7 @@ Updates: fixing plot flashing while data is being plotted
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -18,10 +19,16 @@ import tempfile
 import os
 import io
 import time
+from pathlib import Path
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
 
 st.set_page_config(layout="wide")
+
+PLOTLY_COMPONENT = components.declare_component(
+    "persistent_plotly_chart",
+    path=str(Path(__file__).parent / "persistent_plotly_chart_component"),
+)
 
 # Footer section
 footer = """
@@ -105,6 +112,23 @@ def watch_param(param_key: str, new_value) -> None:
             "new_val": new_value
         })
     st.session_state[old_key] = new_value
+
+def render_persistent_plotly(fig: go.Figure, key: str, height: int) -> None:
+    """
+    Render Plotly through a lightweight custom component so the browser keeps
+    the same chart instance alive across reruns and applies updates in place.
+    """
+    PLOTLY_COMPONENT(
+        figure=fig.to_plotly_json(),
+        config={
+            "responsive": True,
+            "displaylogo": False,
+            "scrollZoom": False,
+        },
+        chart_height=height,
+        key=key,
+        default=None,
+    )
 
 # -------------------- Function to clear all data --------------------
 def clear_all_data():
@@ -672,9 +696,11 @@ if uploaded_file is not None:
         fig = build_main_figure()
         if fig is not None:
             st.session_state.last_fig = fig
-            plot_placeholder.plotly_chart(fig, use_container_width=True, key="main_live_plot")
+            with plot_placeholder.container():
+                render_persistent_plotly(fig, key="main_live_plot_component", height=520)
         elif st.session_state.last_fig is not None:
-            plot_placeholder.plotly_chart(st.session_state.last_fig, use_container_width=True, key="main_live_plot")
+            with plot_placeholder.container():
+                render_persistent_plotly(st.session_state.last_fig, key="main_live_plot_component", height=520)
         else:
             with plot_placeholder.container():
                 st.write("Please start the simulation to see the plot and numerical values.")
@@ -867,13 +893,13 @@ if uploaded_file is not None:
                 return
 
             analysis_chart_keys = [
-                "analysis_prop_diff",
-                "analysis_total_prop",
-                "analysis_prop_conc",
+                "analysis_prop_diff_component",
+                "analysis_total_prop_component",
+                "analysis_prop_conc_component",
             ]
             for idx, fig_analysis in enumerate(analysis_figs):
                 chart_key = analysis_chart_keys[idx] if idx < len(analysis_chart_keys) else f"analysis_chart_{idx}"
-                st.plotly_chart(fig_analysis, use_container_width=True, key=chart_key)
+                render_persistent_plotly(fig_analysis, key=chart_key, height=520)
 
     @st.fragment(run_every=st.session_state.delay / 1000.0)
     def live_region():
