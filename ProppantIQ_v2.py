@@ -3,7 +3,7 @@
 """
 Created on Wed Oct 17 11:29:15 2024
 
-Updates: adding in clear data button
+Updates: fixing plot flashing while data is being plotted
 
 @author: coltonhoward
 """
@@ -122,6 +122,9 @@ def clear_all_data():
     st.session_state["box_swap_until"] = 0.0
     st.session_state["box_swap_audio_nonce"] = 0
     st.session_state["box_swap_audio_rendered_nonce"] = 0
+    st.session_state["main_fig"] = None
+    st.session_state["main_fig_signature"] = None
+    st.session_state["analysis_fig_signature"] = None
 
     # Clear param-change events
     st.session_state["param_change_events"] = []
@@ -198,6 +201,12 @@ if uploaded_file is not None:
         st.session_state["box_swap_audio_nonce"] = 0
     if "box_swap_audio_rendered_nonce" not in st.session_state:
         st.session_state["box_swap_audio_rendered_nonce"] = 0
+    if "main_fig" not in st.session_state:
+        st.session_state["main_fig"] = None
+    if "main_fig_signature" not in st.session_state:
+        st.session_state["main_fig_signature"] = None
+    if "analysis_fig_signature" not in st.session_state:
+        st.session_state["analysis_fig_signature"] = None
 
     if "analysis_figs" not in st.session_state:
         st.session_state["analysis_figs"] = []
@@ -318,6 +327,9 @@ if uploaded_file is not None:
         st.session_state["box_swap_until"] = 0.0
         st.session_state["box_swap_audio_nonce"] = 0
         st.session_state["box_swap_audio_rendered_nonce"] = 0
+        st.session_state["main_fig"] = None
+        st.session_state["main_fig_signature"] = None
+        st.session_state["analysis_fig_signature"] = None
         st.session_state["analysis_figs"].clear()
         st.session_state["analysis_plots_created"] = False
 
@@ -488,72 +500,70 @@ if uploaded_file is not None:
 
         return True
 
-    def build_main_figure():
-        if st.session_state.x_full.empty:
-            return None
+    def build_param_change_points(y_series):
+        if st.session_state.x_full.empty or y_series.empty:
+            return [], [], []
 
+        event_x = []
+        event_y = []
+        event_text = []
+        for evt in st.session_state.get("param_change_events", []):
+            evt_x = evt["x"]
+            idx = (st.session_state.x_full - evt_x).abs().argmin()
+            event_x.append(st.session_state.x_full.iloc[idx])
+            event_y.append(y_series.iloc[idx])
+            event_text.append(f"{evt['param']} -> {evt['new_val']}")
+
+        return event_x, event_y, event_text
+
+    def create_main_figure():
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.calc_ppa_smooth_full,
+            x=[],
+            y=[],
             name='Calc Prop Conc',
             line=dict(color=calc_prop_color),
             yaxis='y1',
             hovertemplate='%{y:.2f}'
         ))
         fig.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.y6_full,
+            x=[],
+            y=[],
             name='Design Prop Conc',
             line=dict(color='green'),
             yaxis='y1',
             hovertemplate='%{y:.2f}'
         ))
         fig.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.calc_clean_rate_full,
+            x=[],
+            y=[],
             name='Calc Clean Rate',
             line=dict(color=y2_color),
             yaxis='y3'
         ))
         fig.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.y3_full,
+            x=[],
+            y=[],
             name=y3_column,
             line=dict(color=y3_color),
             yaxis='y3'
         ))
         fig.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.y4_full,
+            x=[],
+            y=[],
             name=y4_column,
             line=dict(color=y4_color),
             yaxis='y4'
         ))
-
-        param_events = st.session_state.get("param_change_events", [])
-        param_event_x = []
-        param_event_y = []
-        param_event_text = []
-        for evt in param_events:
-            evt_x = evt["x"]
-            idx = (st.session_state.x_full - evt_x).abs().argmin()
-            y_val = st.session_state.calc_ppa_smooth_full.iloc[idx]
-            param_event_x.append(st.session_state.x_full.iloc[idx])
-            param_event_y.append(y_val)
-            param_event_text.append(f"{evt['param']} -> {evt['new_val']}")
-
-        if param_event_x:
-            fig.add_trace(go.Scatter(
-                x=param_event_x,
-                y=param_event_y,
-                mode='markers',
-                text=param_event_text,
-                hovertemplate='%{text}<extra></extra>',
-                marker=dict(symbol='diamond', color='red', size=10),
-                name='Calc Changes'
-            ))
-
+        fig.add_trace(go.Scatter(
+            x=[],
+            y=[],
+            mode='markers',
+            text=[],
+            hovertemplate='%{text}<extra></extra>',
+            marker=dict(symbol='diamond', color='red', size=10),
+            name='Calc Changes'
+        ))
         fig.update_layout(
             xaxis=dict(domain=[0.05, 0.95], range=[x_min, x_max]),
             yaxis=dict(
@@ -563,10 +573,7 @@ if uploaded_file is not None:
                 tickfont=dict(color='green')
             ),
             yaxis3=dict(
-                title=dict(
-                    text="Rate (bpm)",
-                    font=dict(color=y3_color)
-                ),
+                title=dict(text="Rate (bpm)", font=dict(color=y3_color)),
                 tickfont=dict(color=y3_color),
                 anchor='free',
                 overlaying='y',
@@ -576,10 +583,7 @@ if uploaded_file is not None:
                 showgrid=False,
             ),
             yaxis4=dict(
-                title=dict(
-                    text=y4_column,
-                    font=dict(color=y4_color)
-                ),
+                title=dict(text=y4_column, font=dict(color=y4_color)),
                 tickfont=dict(color=y4_color),
                 anchor='free',
                 overlaying='y',
@@ -598,6 +602,47 @@ if uploaded_file is not None:
             autosize=True,
             uirevision="main-live-plot",
         )
+        return fig
+
+    def build_main_figure():
+        if st.session_state.x_full.empty:
+            return None
+
+        current_signature = (y3_column, y4_column, x_min, x_max, y1_max, y3_max, y4_max)
+        if (
+            st.session_state.get("main_fig") is None
+            or st.session_state.get("main_fig_signature") != current_signature
+        ):
+            st.session_state["main_fig"] = create_main_figure()
+            st.session_state["main_fig_signature"] = current_signature
+
+        fig = st.session_state["main_fig"]
+        x_values = st.session_state.x_full.tolist()
+        fig.data[0].x = x_values
+        fig.data[0].y = st.session_state.calc_ppa_smooth_full.tolist()
+        fig.data[1].x = x_values
+        fig.data[1].y = st.session_state.y6_full.tolist()
+        fig.data[2].x = x_values
+        fig.data[2].y = st.session_state.calc_clean_rate_full.tolist()
+        fig.data[3].x = x_values
+        fig.data[3].y = st.session_state.y3_full.tolist()
+        fig.data[3].name = y3_column
+        fig.data[4].x = x_values
+        fig.data[4].y = st.session_state.y4_full.tolist()
+        fig.data[4].name = y4_column
+
+        param_event_x, param_event_y, param_event_text = build_param_change_points(
+            st.session_state.calc_ppa_smooth_full
+        )
+        fig.data[5].x = param_event_x
+        fig.data[5].y = param_event_y
+        fig.data[5].text = param_event_text
+
+        fig.layout.xaxis.range = [x_min, x_max]
+        fig.layout.yaxis.range = [0, y1_max]
+        fig.layout.yaxis3.range = [0, y3_max]
+        fig.layout.yaxis4.range = [0, y4_max]
+        fig.layout.yaxis4.title.text = y4_column
 
         return fig
 
@@ -688,42 +733,18 @@ if uploaded_file is not None:
 
         render_box_swap_notice()
 
-    def build_analysis_figures():
-        if st.session_state.x_full.empty or st.session_state.y5_full.empty:
-            return []
-
-        analysis_figs = []
-        param_events = st.session_state.get("param_change_events", [])
-
-        prop_diff_series = st.session_state.calc_total_proppant_full - st.session_state.y5_full
+    def create_analysis_figures():
         fig_diff = go.Figure()
+        fig_diff.add_trace(go.Scatter(x=[], y=[], name='Prop Difference', line=dict(color=delta_prop_color)))
         fig_diff.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=prop_diff_series,
-            name='Prop Difference',
-            line=dict(color=delta_prop_color)
+            x=[],
+            y=[],
+            mode='markers',
+            text=[],
+            hovertemplate='%{text}<extra></extra>',
+            marker=dict(symbol='diamond', color='red', size=10),
+            name='Calc Changes'
         ))
-
-        px_diff, py_diff, pt_diff = [], [], []
-        for evt in param_events:
-            evt_x = evt["x"]
-            idx = (st.session_state.x_full - evt_x).abs().argmin()
-            y_val = prop_diff_series.iloc[idx]
-            px_diff.append(st.session_state.x_full.iloc[idx])
-            py_diff.append(y_val)
-            pt_diff.append(f"{evt['param']} -> {evt['new_val']}")
-
-        if px_diff:
-            fig_diff.add_trace(go.Scatter(
-                x=px_diff,
-                y=py_diff,
-                mode='markers',
-                text=pt_diff,
-                hovertemplate='%{text}<extra></extra>',
-                marker=dict(symbol='diamond', color='red', size=10),
-                name='Calc Changes'
-            ))
-
         fig_diff.update_layout(
             title='Difference Between Actual Prop Pumped and Design Prop Pumped',
             xaxis=dict(range=[x_min, x_max]),
@@ -731,50 +752,22 @@ if uploaded_file is not None:
             yaxis_title='Difference (lbs)',
             autosize=True,
             margin=dict(l=40, r=40, t=70, b=40),
-            legend=dict(
-                orientation='h',
-                yanchor='bottom',
-                y=1.15,
-                xanchor='center',
-                x=0.5
-            )
+            legend=dict(orientation='h', yanchor='bottom', y=1.15, xanchor='center', x=0.5),
+            uirevision="analysis-prop-diff",
         )
-        analysis_figs.append(fig_diff)
 
         fig_total_prop = go.Figure()
+        fig_total_prop.add_trace(go.Scatter(x=[], y=[], name='Design Prop Pumped', line=dict(color=total_prop_color)))
+        fig_total_prop.add_trace(go.Scatter(x=[], y=[], name='Actual Prop Pumped', line=dict(color=total_calc_prop_color)))
         fig_total_prop.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.y5_full,
-            name='Design Prop Pumped',
-            line=dict(color=total_prop_color)
+            x=[],
+            y=[],
+            mode='markers',
+            text=[],
+            hovertemplate='%{text}<extra></extra>',
+            marker=dict(symbol='diamond', color='red', size=10),
+            name='Calc Changes'
         ))
-        fig_total_prop.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.calc_total_proppant_full,
-            name='Actual Prop Pumped',
-            line=dict(color=total_calc_prop_color)
-        ))
-
-        px_tot, py_tot, pt_tot = [], [], []
-        for evt in param_events:
-            evt_x = evt["x"]
-            idx = (st.session_state.x_full - evt_x).abs().argmin()
-            y_val = st.session_state.calc_total_proppant_full.iloc[idx]
-            px_tot.append(st.session_state.x_full.iloc[idx])
-            py_tot.append(y_val)
-            pt_tot.append(f"{evt['param']} -> {evt['new_val']}")
-
-        if px_tot:
-            fig_total_prop.add_trace(go.Scatter(
-                x=px_tot,
-                y=py_tot,
-                mode='markers',
-                text=pt_tot,
-                hovertemplate='%{text}<extra></extra>',
-                marker=dict(symbol='diamond', color='red', size=10),
-                name='Calc Changes'
-            ))
-
         fig_total_prop.update_layout(
             title='Time vs Design Prop Pumped vs Actual Prop Pumped',
             xaxis=dict(range=[x_min, x_max]),
@@ -782,50 +775,22 @@ if uploaded_file is not None:
             yaxis_title='Proppant (lbs)',
             autosize=True,
             margin=dict(l=40, r=40, t=80, b=40),
-            legend=dict(
-                orientation='h',
-                yanchor='bottom',
-                y=1.10,
-                xanchor='center',
-                x=0.5
-            )
+            legend=dict(orientation='h', yanchor='bottom', y=1.10, xanchor='center', x=0.5),
+            uirevision="analysis-total-prop",
         )
-        analysis_figs.append(fig_total_prop)
 
         fig_prop_conc = go.Figure()
+        fig_prop_conc.add_trace(go.Scatter(x=[], y=[], name='Calculated Prop Conc', line=dict(color=calc_prop_color)))
+        fig_prop_conc.add_trace(go.Scatter(x=[], y=[], name='Design Prop Conc', line=dict(color='green')))
         fig_prop_conc.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.calc_ppa_smooth_full,
-            name='Calculated Prop Conc',
-            line=dict(color=calc_prop_color)
+            x=[],
+            y=[],
+            mode='markers',
+            text=[],
+            hovertemplate='%{text}<extra></extra>',
+            marker=dict(symbol='diamond', color='red', size=10),
+            name='Calc Changes'
         ))
-        fig_prop_conc.add_trace(go.Scatter(
-            x=st.session_state.x_full,
-            y=st.session_state.y6_full,
-            name='Design Prop Conc',
-            line=dict(color='green')
-        ))
-
-        px_conc, py_conc, pt_conc = [], [], []
-        for evt in param_events:
-            evt_x = evt["x"]
-            idx = (st.session_state.x_full - evt_x).abs().argmin()
-            y_val = st.session_state.calc_ppa_smooth_full.iloc[idx]
-            px_conc.append(st.session_state.x_full.iloc[idx])
-            py_conc.append(y_val)
-            pt_conc.append(f"{evt['param']} -> {evt['new_val']}")
-
-        if px_conc:
-            fig_prop_conc.add_trace(go.Scatter(
-                x=px_conc,
-                y=py_conc,
-                mode='markers',
-                text=pt_conc,
-                hovertemplate='%{text}<extra></extra>',
-                marker=dict(symbol='diamond', color='red', size=10),
-                name='Calc Changes'
-            ))
-
         fig_prop_conc.update_layout(
             title='Time vs Prop Conc (Calc & Design',
             xaxis=dict(range=[x_min, x_max]),
@@ -833,17 +798,58 @@ if uploaded_file is not None:
             yaxis_title='Concentration',
             autosize=True,
             margin=dict(l=40, r=40, t=80, b=40),
-            legend=dict(
-                orientation='h',
-                yanchor='bottom',
-                y=1.10,
-                xanchor='center',
-                x=0.5
-            )
+            legend=dict(orientation='h', yanchor='bottom', y=1.10, xanchor='center', x=0.5),
+            uirevision="analysis-prop-conc",
         )
-        analysis_figs.append(fig_prop_conc)
 
-        return analysis_figs
+        return [fig_diff, fig_total_prop, fig_prop_conc]
+
+    def build_analysis_figures():
+        if st.session_state.x_full.empty or st.session_state.y5_full.empty:
+            return []
+
+        current_signature = (x_min, x_max)
+        if (
+            len(st.session_state.get("analysis_figs", [])) != 3
+            or st.session_state.get("analysis_fig_signature") != current_signature
+        ):
+            st.session_state["analysis_figs"] = create_analysis_figures()
+            st.session_state["analysis_fig_signature"] = current_signature
+
+        x_values = st.session_state.x_full.tolist()
+        prop_diff_series = st.session_state.calc_total_proppant_full - st.session_state.y5_full
+        diff_x, diff_y, diff_text = build_param_change_points(prop_diff_series)
+        total_x, total_y, total_text = build_param_change_points(st.session_state.calc_total_proppant_full)
+        conc_x, conc_y, conc_text = build_param_change_points(st.session_state.calc_ppa_smooth_full)
+
+        fig_diff, fig_total_prop, fig_prop_conc = st.session_state["analysis_figs"]
+
+        fig_diff.data[0].x = x_values
+        fig_diff.data[0].y = prop_diff_series.tolist()
+        fig_diff.data[1].x = diff_x
+        fig_diff.data[1].y = diff_y
+        fig_diff.data[1].text = diff_text
+        fig_diff.layout.xaxis.range = [x_min, x_max]
+
+        fig_total_prop.data[0].x = x_values
+        fig_total_prop.data[0].y = st.session_state.y5_full.tolist()
+        fig_total_prop.data[1].x = x_values
+        fig_total_prop.data[1].y = st.session_state.calc_total_proppant_full.tolist()
+        fig_total_prop.data[2].x = total_x
+        fig_total_prop.data[2].y = total_y
+        fig_total_prop.data[2].text = total_text
+        fig_total_prop.layout.xaxis.range = [x_min, x_max]
+
+        fig_prop_conc.data[0].x = x_values
+        fig_prop_conc.data[0].y = st.session_state.calc_ppa_smooth_full.tolist()
+        fig_prop_conc.data[1].x = x_values
+        fig_prop_conc.data[1].y = st.session_state.y6_full.tolist()
+        fig_prop_conc.data[2].x = conc_x
+        fig_prop_conc.data[2].y = conc_y
+        fig_prop_conc.data[2].text = conc_text
+        fig_prop_conc.layout.xaxis.range = [x_min, x_max]
+
+        return st.session_state["analysis_figs"]
 
     def render_analysis_panels():
         if not st.session_state.analysis_mode:
@@ -875,9 +881,14 @@ if uploaded_file is not None:
             advance_simulation_step()
 
         render_live_panels()
-        render_analysis_panels()
 
     live_region()
+
+    @st.fragment(run_every=max(st.session_state.delay / 1000.0, 1.0))
+    def analysis_region():
+        render_analysis_panels()
+
+    analysis_region()
 
     # ------------------ CSV Download ------------------
     export_data = pd.DataFrame({
