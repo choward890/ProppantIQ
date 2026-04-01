@@ -9,7 +9,6 @@ Updates: fixing plot flashing while data is being plotted
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -19,16 +18,10 @@ import tempfile
 import os
 import io
 import time
-from pathlib import Path
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
 
 st.set_page_config(layout="wide")
-
-PLOTLY_COMPONENT = components.declare_component(
-    "persistent_plotly_chart",
-    path=str(Path(__file__).parent / "persistent_plotly_chart_component"),
-)
 
 # Footer section
 footer = """
@@ -112,23 +105,6 @@ def watch_param(param_key: str, new_value) -> None:
             "new_val": new_value
         })
     st.session_state[old_key] = new_value
-
-def render_persistent_plotly(fig: go.Figure, key: str, height: int) -> None:
-    """
-    Render Plotly through a lightweight custom component so the browser keeps
-    the same chart instance alive across reruns and applies updates in place.
-    """
-    PLOTLY_COMPONENT(
-        figure=fig.to_plotly_json(),
-        config={
-            "responsive": True,
-            "displaylogo": False,
-            "scrollZoom": False,
-        },
-        chart_height=height,
-        key=key,
-        default=None,
-    )
 
 # -------------------- Function to clear all data --------------------
 def clear_all_data():
@@ -215,6 +191,8 @@ if uploaded_file is not None:
         st.session_state.index = 0
     if 'last_fig' not in st.session_state:
         st.session_state.last_fig = None
+    if 'live_fig' not in st.session_state:
+        st.session_state.live_fig = None   
     if 'analysis_mode' not in st.session_state:
         st.session_state.analysis_mode = False
     if 'last_full_boxes_consumed_calc' not in st.session_state:
@@ -540,55 +518,57 @@ if uploaded_file is not None:
 
         return event_x, event_y, event_text
 
-    def create_main_figure():
+    def build_live_figure(x_min, x_max, y1_max, y3_max, y4_max,
+                          calc_prop_color, y2_color, y3_color, y4_color,
+                          y3_column, y4_column):
         fig = go.Figure()
+    
         fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
             name='Calc Prop Conc',
+            mode='lines',
             line=dict(color=calc_prop_color),
             yaxis='y1',
             hovertemplate='%{y:.2f}'
         ))
+    
         fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
             name='Design Prop Conc',
+            mode='lines',
             line=dict(color='green'),
             yaxis='y1',
             hovertemplate='%{y:.2f}'
         ))
+    
         fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
             name='Calc Clean Rate',
+            mode='lines',
             line=dict(color=y2_color),
             yaxis='y3'
         ))
+    
         fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
             name=y3_column,
+            mode='lines',
             line=dict(color=y3_color),
             yaxis='y3'
         ))
+    
         fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
             name=y4_column,
+            mode='lines',
             line=dict(color=y4_color),
             yaxis='y4'
         ))
+    
         fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
+            name='Calc Changes',
             mode='markers',
-            text=[],
-            hovertemplate='%{text}<extra></extra>',
             marker=dict(symbol='diamond', color='red', size=10),
-            name='Calc Changes'
+            hovertemplate='%{text}<extra></extra>'
         ))
+    
         fig.update_layout(
+            uirevision="main_live_plot",
             xaxis=dict(domain=[0.05, 0.95], range=[x_min, x_max]),
             yaxis=dict(
                 title=dict(text="Prop Conc", font=dict(color='green')),
@@ -624,8 +604,8 @@ if uploaded_file is not None:
             ),
             margin=dict(l=0, r=0, t=30, b=10),
             autosize=True,
-            uirevision="main-live-plot",
         )
+    
         return fig
 
     def build_main_figure():
@@ -696,11 +676,9 @@ if uploaded_file is not None:
         fig = build_main_figure()
         if fig is not None:
             st.session_state.last_fig = fig
-            with plot_placeholder.container():
-                render_persistent_plotly(fig, key="main_live_plot_component", height=520)
+            plot_placeholder.plotly_chart(fig, use_container_width=True, key="main_live_plot")
         elif st.session_state.last_fig is not None:
-            with plot_placeholder.container():
-                render_persistent_plotly(st.session_state.last_fig, key="main_live_plot_component", height=520)
+            plot_placeholder.plotly_chart(st.session_state.last_fig, use_container_width=True, key="main_live_plot")
         else:
             with plot_placeholder.container():
                 st.write("Please start the simulation to see the plot and numerical values.")
@@ -893,13 +871,13 @@ if uploaded_file is not None:
                 return
 
             analysis_chart_keys = [
-                "analysis_prop_diff_component",
-                "analysis_total_prop_component",
-                "analysis_prop_conc_component",
+                "analysis_prop_diff",
+                "analysis_total_prop",
+                "analysis_prop_conc",
             ]
             for idx, fig_analysis in enumerate(analysis_figs):
                 chart_key = analysis_chart_keys[idx] if idx < len(analysis_chart_keys) else f"analysis_chart_{idx}"
-                render_persistent_plotly(fig_analysis, key=chart_key, height=520)
+                st.plotly_chart(fig_analysis, use_container_width=True, key=chart_key)
 
     @st.fragment(run_every=st.session_state.delay / 1000.0)
     def live_region():
