@@ -106,10 +106,6 @@ def watch_param(param_key: str, new_value) -> None:
         })
     st.session_state[old_key] = new_value
 
-@st.cache_data
-def load_csv(file_bytes):
-    return pd.read_csv(io.BytesIO(file_bytes), skiprows=[1])
-
 # -------------------- Function to clear all data --------------------
 def clear_all_data():
     """
@@ -126,8 +122,8 @@ def clear_all_data():
     st.session_state["box_swap_until"] = 0.0
     st.session_state["box_swap_audio_nonce"] = 0
     st.session_state["box_swap_audio_rendered_nonce"] = 0
-    st.session_state["live_fig"] = None
-    st.session_state["live_fig_signature"] = None
+    st.session_state["main_fig"] = None
+    st.session_state["main_fig_signature"] = None
     st.session_state["analysis_fig_signature"] = None
 
     # Clear param-change events
@@ -149,14 +145,13 @@ def clear_all_data():
 
 # Sidebar
 st.sidebar.title("Settings")
-stream_locked = st.session_state.get("running", False)
 
 # 1. File Upload
 with st.sidebar.expander("1. File Upload", expanded=True):
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv", disabled=stream_locked)
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 
 if uploaded_file is not None:
-    data = load_csv(uploaded_file.getvalue())
+    data = pd.read_csv(uploaded_file, skiprows=[1])  # Skip second line (units)
     st.sidebar.success(f"File uploaded: {uploaded_file.name}")
     columns = data.columns.tolist()
 
@@ -165,12 +160,12 @@ if uploaded_file is not None:
 
     # 2. CSV Channel Mapping
     with st.sidebar.expander("2. CSV Channel Mapping", expanded=True):
-        x_column = st.selectbox("Time ⤵️", columns, key='x_column', disabled=stream_locked)
-        y1_column = st.selectbox("Actual Prop Concentration ⤵️ (calculating input)", columns, key='y1_column', disabled=stream_locked)
-        y3_column = st.selectbox("Total Slurry Rate ⤵️", columns, key='y3_column', disabled=stream_locked)
-        y4_column = st.selectbox("Pressure ⤵️", columns, key='y4_column', disabled=stream_locked)
-        y5_column = st.selectbox("Total Proppant ⤵️", columns, key='y5_column', disabled=stream_locked)
-        y6_column = st.selectbox("Design Prop Concentration ⤵️", columns, key='y6_column', disabled=stream_locked)
+        x_column = st.selectbox("Time ⤵️", columns, key='x_column')
+        y1_column = st.selectbox("Actual Prop Concentration ⤵️ (calculating input)", columns, key='y1_column')
+        y3_column = st.selectbox("Total Slurry Rate ⤵️", columns, key='y3_column')
+        y4_column = st.selectbox("Pressure ⤵️", columns, key='y4_column')
+        y5_column = st.selectbox("Total Proppant ⤵️", columns, key='y5_column')
+        y6_column = st.selectbox("Design Prop Concentration ⤵️", columns, key='y6_column')
 
     # -------------------- Control Buttons (incl. Clear All Data) --------------------
     col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -197,9 +192,7 @@ if uploaded_file is not None:
     if 'last_fig' not in st.session_state:
         st.session_state.last_fig = None
     if 'live_fig' not in st.session_state:
-        st.session_state.live_fig = None
-    if 'live_fig_signature' not in st.session_state:
-        st.session_state.live_fig_signature = None
+        st.session_state.live_fig = None   
     if 'analysis_mode' not in st.session_state:
         st.session_state.analysis_mode = False
     if 'last_full_boxes_consumed_calc' not in st.session_state:
@@ -210,6 +203,10 @@ if uploaded_file is not None:
         st.session_state["box_swap_audio_nonce"] = 0
     if "box_swap_audio_rendered_nonce" not in st.session_state:
         st.session_state["box_swap_audio_rendered_nonce"] = 0
+    if "main_fig" not in st.session_state:
+        st.session_state["main_fig"] = None
+    if "main_fig_signature" not in st.session_state:
+        st.session_state["main_fig_signature"] = None
     if "analysis_fig_signature" not in st.session_state:
         st.session_state["analysis_fig_signature"] = None
 
@@ -243,13 +240,13 @@ if uploaded_file is not None:
 
     # 3. Simulation Parameters
     with st.sidebar.expander("3. Simulation Parameters", expanded=False):
-        delay = st.number_input("Delay (ms):", min_value=250, value=st.session_state.get('delay', 1500), step=250, key='delay', disabled=stream_locked)
-        index_increment = st.number_input("Index rows:", min_value=1, value=st.session_state.get('index_increment', 10), step=1, key='index_increment', disabled=stream_locked)
-        smoothing_window = st.number_input("Prop Smooth:", min_value=1, value=st.session_state.get('smoothing_window', 10), step=1, key='smoothing_window', disabled=stream_locked)
+        delay = st.number_input("Delay (ms):", min_value=100, value=st.session_state.get('delay', 1000), step=100, key='delay')
+        index_increment = st.number_input("Index rows:", min_value=1, value=st.session_state.get('index_increment', 10), step=1, key='index_increment')
+        smoothing_window = st.number_input("Prop Smooth:", min_value=1, value=st.session_state.get('smoothing_window', 10), step=1, key='smoothing_window')
 
-        show_csv_boxes = st.checkbox("Show Design Boxes", value=st.session_state.get('show_csv_boxes', False), disabled=stream_locked)
+        show_csv_boxes = st.checkbox("Show Design Boxes", value=st.session_state.get('show_csv_boxes', False))
         st.session_state['show_csv_boxes'] = show_csv_boxes
-        show_calc_boxes = st.checkbox("Show Calculated Boxes", value=st.session_state.get('show_calc_boxes', True), disabled=stream_locked)
+        show_calc_boxes = st.checkbox("Show Calculated Boxes", value=st.session_state.get('show_calc_boxes', True))
         st.session_state['show_calc_boxes'] = show_calc_boxes
 
     # 4. Calculation Parameters
@@ -258,8 +255,7 @@ if uploaded_file is not None:
             "Base Density:",
             min_value=0.1,
             value=st.session_state.get('base_density', 8.33),
-            key='base_density',
-            disabled=stream_locked
+            key='base_density'
         )
         watch_param('base_density', base_density_new)
 
@@ -267,24 +263,23 @@ if uploaded_file is not None:
             "Sand SG:",
             min_value=0.1,
             value=st.session_state.get('specific_gravity', 2.65),
-            key='specific_gravity',
-            disabled=stream_locked
+            key='specific_gravity'
         )
         watch_param('specific_gravity', specific_gravity_new)
 
-        ppr_new = st.number_input("PPR:", min_value=1, value=st.session_state.get('ppr', 45), key='ppr', disabled=stream_locked)
+        ppr_new = st.number_input("PPR:", min_value=1, value=st.session_state.get('ppr', 45), key='ppr')
         watch_param('ppr', ppr_new)
 
-        pt_prop_factor_new = st.number_input("PT Factor:", min_value=0.1, value=st.session_state.get('pt_prop_factor', 1.0), key='pt_prop_factor', disabled=stream_locked)
+        pt_prop_factor_new = st.number_input("PT Factor:", min_value=0.1, value=st.session_state.get('pt_prop_factor', 1.0), key='pt_prop_factor')
         watch_param('pt_prop_factor', pt_prop_factor_new)
 
-        high_cal_new = st.number_input("High Cal:", min_value=0.1, value=st.session_state.get('high_cal', 15.19), key='high_cal', disabled=stream_locked)
+        high_cal_new = st.number_input("High Cal:", min_value=0.1, value=st.session_state.get('high_cal', 15.19), key='high_cal')
         watch_param('high_cal', high_cal_new)
 
-        low_cal_new = st.number_input("Low Cal:", min_value=0.1, value=st.session_state.get('low_cal', 8.33), key='low_cal', disabled=stream_locked)
+        low_cal_new = st.number_input("Low Cal:", min_value=0.1, value=st.session_state.get('low_cal', 8.33), key='low_cal')
         watch_param('low_cal', low_cal_new)
 
-        baby_beast_new = st.number_input("Baby Beast Factor", min_value=0.1, value=st.session_state.get('baby_beast', 1.0), key='baby_beast', disabled=stream_locked)
+        baby_beast_new = st.number_input("Baby Beast Factor", min_value=0.1, value=st.session_state.get('baby_beast', 1.0), key='baby_beast')
         watch_param('baby_beast', baby_beast_new)
 
     # Local variable shortcuts
@@ -315,47 +310,12 @@ if uploaded_file is not None:
     delta_prop_color = '#9FE2BF'       # Ahead/Behind difference
     cum_clean_vol_color = '#0D84E6'    # total clean volume
 
-    st.session_state["uploaded_data"] = data
-    st.session_state["selected_columns"] = {
-        "x": x_column,
-        "y1": y1_column,
-        "y3": y3_column,
-        "y4": y4_column,
-        "y5": y5_column,
-        "y6": y6_column,
-    }
-    st.session_state["plot_ranges"] = {
-        "x_min": x_min,
-        "x_max": x_max,
-        "y1_max": y1_max,
-        "y3_max": y3_max,
-        "y4_max": y4_max,
-    }
-    st.session_state["plot_colors"] = {
-        "calc_prop_color": calc_prop_color,
-        "y2_color": y2_color,
-        "y3_color": y3_color,
-        "y4_color": y4_color,
-        "total_prop_color": total_prop_color,
-        "total_calc_prop_color": total_calc_prop_color,
-        "delta_prop_color": delta_prop_color,
-        "cum_clean_vol_color": cum_clean_vol_color,
-    }
-
     plot_placeholder = st.empty()
     numerical_values_placeholder = st.empty()
     boxes_placeholder_csv = st.empty()
     boxes_placeholder_calc = st.empty()
     analysis_placeholder = st.empty()
     box_swap_placeholder = st.empty()
-    main_chart_container = plot_placeholder.container()
-    st.session_state["plot_placeholder"] = plot_placeholder
-    st.session_state["numerical_values_placeholder"] = numerical_values_placeholder
-    st.session_state["boxes_placeholder_csv"] = boxes_placeholder_csv
-    st.session_state["boxes_placeholder_calc"] = boxes_placeholder_calc
-    st.session_state["analysis_placeholder"] = analysis_placeholder
-    st.session_state["box_swap_placeholder"] = box_swap_placeholder
-    st.session_state["main_chart_container"] = main_chart_container
 
     # ------------------ Start/Restart/Pause/Resume/Analysis actions ------------------
     if start_button:
@@ -369,8 +329,8 @@ if uploaded_file is not None:
         st.session_state["box_swap_until"] = 0.0
         st.session_state["box_swap_audio_nonce"] = 0
         st.session_state["box_swap_audio_rendered_nonce"] = 0
-        st.session_state["live_fig"] = None
-        st.session_state["live_fig_signature"] = None
+        st.session_state["main_fig"] = None
+        st.session_state["main_fig_signature"] = None
         st.session_state["analysis_fig_signature"] = None
         st.session_state["analysis_figs"].clear()
         st.session_state["analysis_plots_created"] = False
@@ -512,9 +472,6 @@ if uploaded_file is not None:
         }
 
     def advance_simulation_step():
-        data = st.session_state["uploaded_data"]
-        selected_columns = st.session_state["selected_columns"]
-
         if not st.session_state.running or st.session_state.index >= len(data):
             st.session_state.running = False
             return False
@@ -522,12 +479,12 @@ if uploaded_file is not None:
         start_index = st.session_state.index
         end_index = min(start_index + int(st.session_state.index_increment), len(data))
 
-        x_new = data[selected_columns["x"]].iloc[start_index:end_index].reset_index(drop=True)
-        y1_new = data[selected_columns["y1"]].iloc[start_index:end_index].reset_index(drop=True)
-        y3_new = data[selected_columns["y3"]].iloc[start_index:end_index].reset_index(drop=True)
-        y4_new = data[selected_columns["y4"]].iloc[start_index:end_index].reset_index(drop=True)
-        y5_new = data[selected_columns["y5"]].iloc[start_index:end_index].reset_index(drop=True)
-        y6_new = data[selected_columns["y6"]].iloc[start_index:end_index].reset_index(drop=True)
+        x_new = data[x_column].iloc[start_index:end_index].reset_index(drop=True)
+        y1_new = data[y1_column].iloc[start_index:end_index].reset_index(drop=True)
+        y3_new = data[y3_column].iloc[start_index:end_index].reset_index(drop=True)
+        y4_new = data[y4_column].iloc[start_index:end_index].reset_index(drop=True)
+        y5_new = data[y5_column].iloc[start_index:end_index].reset_index(drop=True)
+        y6_new = data[y6_column].iloc[start_index:end_index].reset_index(drop=True)
 
         perform_calculations_on_new_data(x_new, y1_new, y3_new, y4_new, y5_new)
         st.session_state.y6_full = pd.concat([st.session_state.y6_full, y6_new], ignore_index=True)
@@ -655,31 +612,15 @@ if uploaded_file is not None:
         if st.session_state.x_full.empty:
             return None
 
-        selected_columns = st.session_state["selected_columns"]
-        plot_ranges = st.session_state["plot_ranges"]
-        plot_colors = st.session_state["plot_colors"]
-
-        current_signature = (
-            selected_columns["y3"],
-            selected_columns["y4"],
-            plot_ranges["x_min"],
-            plot_ranges["x_max"],
-            plot_ranges["y1_max"],
-            plot_ranges["y3_max"],
-            plot_ranges["y4_max"],
-        )
+        current_signature = (y3_column, y4_column, x_min, x_max, y1_max, y3_max, y4_max)
         if (
-            st.session_state.get("live_fig") is None
-            or st.session_state.get("live_fig_signature") != current_signature
+            st.session_state.get("main_fig") is None
+            or st.session_state.get("main_fig_signature") != current_signature
         ):
-            st.session_state["live_fig"] = build_live_figure(
-                plot_ranges["x_min"], plot_ranges["x_max"], plot_ranges["y1_max"], plot_ranges["y3_max"], plot_ranges["y4_max"],
-                plot_colors["calc_prop_color"], plot_colors["y2_color"], plot_colors["y3_color"], plot_colors["y4_color"],
-                selected_columns["y3"], selected_columns["y4"]
-            )
-            st.session_state["live_fig_signature"] = current_signature
+            st.session_state["main_fig"] = create_main_figure()
+            st.session_state["main_fig_signature"] = current_signature
 
-        fig = st.session_state["live_fig"]
+        fig = st.session_state["main_fig"]
         x_values = st.session_state.x_full.tolist()
         fig.data[0].x = x_values
         fig.data[0].y = st.session_state.calc_ppa_smooth_full.tolist()
@@ -689,10 +630,10 @@ if uploaded_file is not None:
         fig.data[2].y = st.session_state.calc_clean_rate_full.tolist()
         fig.data[3].x = x_values
         fig.data[3].y = st.session_state.y3_full.tolist()
-        fig.data[3].name = selected_columns["y3"]
+        fig.data[3].name = y3_column
         fig.data[4].x = x_values
         fig.data[4].y = st.session_state.y4_full.tolist()
-        fig.data[4].name = selected_columns["y4"]
+        fig.data[4].name = y4_column
 
         param_event_x, param_event_y, param_event_text = build_param_change_points(
             st.session_state.calc_ppa_smooth_full
@@ -701,16 +642,15 @@ if uploaded_file is not None:
         fig.data[5].y = param_event_y
         fig.data[5].text = param_event_text
 
-        fig.layout.xaxis.range = [plot_ranges["x_min"], plot_ranges["x_max"]]
-        fig.layout.yaxis.range = [0, plot_ranges["y1_max"]]
-        fig.layout.yaxis3.range = [0, plot_ranges["y3_max"]]
-        fig.layout.yaxis4.range = [0, plot_ranges["y4_max"]]
-        fig.layout.yaxis4.title.text = selected_columns["y4"]
+        fig.layout.xaxis.range = [x_min, x_max]
+        fig.layout.yaxis.range = [0, y1_max]
+        fig.layout.yaxis3.range = [0, y3_max]
+        fig.layout.yaxis4.range = [0, y4_max]
+        fig.layout.yaxis4.title.text = y4_column
 
         return fig
 
     def render_box_swap_notice():
-        box_swap_placeholder = st.session_state["box_swap_placeholder"]
         if time.time() >= st.session_state.get("box_swap_until", 0.0):
             box_swap_placeholder.empty()
             return
@@ -733,23 +673,12 @@ if uploaded_file is not None:
                 st.session_state["box_swap_audio_rendered_nonce"] = current_nonce
 
     def render_live_panels():
-        plot_placeholder = st.session_state["plot_placeholder"]
-        numerical_values_placeholder = st.session_state["numerical_values_placeholder"]
-        boxes_placeholder_csv = st.session_state["boxes_placeholder_csv"]
-        boxes_placeholder_calc = st.session_state["boxes_placeholder_calc"]
-        main_chart_container = st.session_state["main_chart_container"]
-        selected_columns = st.session_state["selected_columns"]
-        plot_colors = st.session_state["plot_colors"]
-        data = st.session_state["uploaded_data"]
-
         fig = build_main_figure()
         if fig is not None:
             st.session_state.last_fig = fig
-            with main_chart_container:
-                st.plotly_chart(fig, use_container_width=True, key="main_live_plot")
+            plot_placeholder.plotly_chart(fig, use_container_width=True, key="main_live_plot")
         elif st.session_state.last_fig is not None:
-            with main_chart_container:
-                st.plotly_chart(st.session_state.last_fig, use_container_width=True, key="main_live_plot")
+            plot_placeholder.plotly_chart(st.session_state.last_fig, use_container_width=True, key="main_live_plot")
         else:
             with plot_placeholder.container():
                 st.write("Please start the simulation to see the plot and numerical values.")
@@ -767,14 +696,14 @@ if uploaded_file is not None:
             cols[0].markdown(colored_metric("Calc Prop Conc (ppa)", f"{metrics['calc_ppa_smooth']:.2f}", "orange"), unsafe_allow_html=True)
             cols[1].markdown(colored_metric("Design Prop Conc (ppa)", f"{metrics['y6']:.2f}", "green"), unsafe_allow_html=True)
             cols[2].markdown(colored_metric("Calc Clean Rate (bpm)", f"{metrics['calc_clean_rate']:.2f}", "#17becf"), unsafe_allow_html=True)
-            cols[3].markdown(colored_metric("Total Clean Vol (bbl)", f"{metrics['cumulative_clean_vol']:.0f}", plot_colors["cum_clean_vol_color"]), unsafe_allow_html=True)
-            cols[4].markdown(colored_metric(f"{selected_columns['y3']} (bpm)", f"{metrics['y3']:.2f}", "blue"), unsafe_allow_html=True)
-            cols[5].markdown(colored_metric(f"{selected_columns['y4']} (psi)", f"{metrics['y4']:.0f}", "red"), unsafe_allow_html=True)
+            cols[3].markdown(colored_metric("Total Clean Vol (bbl)", f"{metrics['cumulative_clean_vol']:.0f}", cum_clean_vol_color), unsafe_allow_html=True)
+            cols[4].markdown(colored_metric(f"{y3_column} (bpm)", f"{metrics['y3']:.2f}", "blue"), unsafe_allow_html=True)
+            cols[5].markdown(colored_metric(f"{y4_column} (psi)", f"{metrics['y4']:.0f}", "red"), unsafe_allow_html=True)
             cols[6].markdown(colored_metric("Design Prop Pumped (lbs)", f"{metrics['y5']:.0f}", "#808080"), unsafe_allow_html=True)
             cols[7].markdown(colored_metric("Actual Prop Pumped (lbs)", f"{metrics['calc_total_proppant']:,.0f}", "orange"), unsafe_allow_html=True)
             cols[8].markdown(colored_metric("Ahead / Behind (lbs)", f"{metrics['prop_diff']:,.0f}", "#9FE2BF"), unsafe_allow_html=True)
 
-        total_proppant_max_csv = data[selected_columns["y5"]].max()
+        total_proppant_max_csv = data[y5_column].max()
         total_boxes_csv = max(1, int(np.ceil(total_proppant_max_csv / 25000)))
         boxes_consumed_csv = metrics['y5'] / 25000
         num_boxes_to_display_csv = min(total_boxes_csv, 30)
@@ -809,11 +738,8 @@ if uploaded_file is not None:
         render_box_swap_notice()
 
     def create_analysis_figures():
-        plot_ranges = st.session_state["plot_ranges"]
-        plot_colors = st.session_state["plot_colors"]
-
         fig_diff = go.Figure()
-        fig_diff.add_trace(go.Scatter(x=[], y=[], name='Prop Difference', line=dict(color=plot_colors["delta_prop_color"])))
+        fig_diff.add_trace(go.Scatter(x=[], y=[], name='Prop Difference', line=dict(color=delta_prop_color)))
         fig_diff.add_trace(go.Scatter(
             x=[],
             y=[],
@@ -825,7 +751,7 @@ if uploaded_file is not None:
         ))
         fig_diff.update_layout(
             title='Difference Between Actual Prop Pumped and Design Prop Pumped',
-            xaxis=dict(range=[plot_ranges["x_min"], plot_ranges["x_max"]]),
+            xaxis=dict(range=[x_min, x_max]),
             xaxis_title='Time',
             yaxis_title='Difference (lbs)',
             autosize=True,
@@ -835,8 +761,8 @@ if uploaded_file is not None:
         )
 
         fig_total_prop = go.Figure()
-        fig_total_prop.add_trace(go.Scatter(x=[], y=[], name='Design Prop Pumped', line=dict(color=plot_colors["total_prop_color"])))
-        fig_total_prop.add_trace(go.Scatter(x=[], y=[], name='Actual Prop Pumped', line=dict(color=plot_colors["total_calc_prop_color"])))
+        fig_total_prop.add_trace(go.Scatter(x=[], y=[], name='Design Prop Pumped', line=dict(color=total_prop_color)))
+        fig_total_prop.add_trace(go.Scatter(x=[], y=[], name='Actual Prop Pumped', line=dict(color=total_calc_prop_color)))
         fig_total_prop.add_trace(go.Scatter(
             x=[],
             y=[],
@@ -848,7 +774,7 @@ if uploaded_file is not None:
         ))
         fig_total_prop.update_layout(
             title='Time vs Design Prop Pumped vs Actual Prop Pumped',
-            xaxis=dict(range=[plot_ranges["x_min"], plot_ranges["x_max"]]),
+            xaxis=dict(range=[x_min, x_max]),
             xaxis_title='Time',
             yaxis_title='Proppant (lbs)',
             autosize=True,
@@ -858,7 +784,7 @@ if uploaded_file is not None:
         )
 
         fig_prop_conc = go.Figure()
-        fig_prop_conc.add_trace(go.Scatter(x=[], y=[], name='Calculated Prop Conc', line=dict(color=plot_colors["calc_prop_color"])))
+        fig_prop_conc.add_trace(go.Scatter(x=[], y=[], name='Calculated Prop Conc', line=dict(color=calc_prop_color)))
         fig_prop_conc.add_trace(go.Scatter(x=[], y=[], name='Design Prop Conc', line=dict(color='green')))
         fig_prop_conc.add_trace(go.Scatter(
             x=[],
@@ -871,7 +797,7 @@ if uploaded_file is not None:
         ))
         fig_prop_conc.update_layout(
             title='Time vs Prop Conc (Calc & Design',
-            xaxis=dict(range=[plot_ranges["x_min"], plot_ranges["x_max"]]),
+            xaxis=dict(range=[x_min, x_max]),
             xaxis_title='Time',
             yaxis_title='Concentration',
             autosize=True,
@@ -886,8 +812,7 @@ if uploaded_file is not None:
         if st.session_state.x_full.empty or st.session_state.y5_full.empty:
             return []
 
-        plot_ranges = st.session_state["plot_ranges"]
-        current_signature = (plot_ranges["x_min"], plot_ranges["x_max"])
+        current_signature = (x_min, x_max)
         if (
             len(st.session_state.get("analysis_figs", [])) != 3
             or st.session_state.get("analysis_fig_signature") != current_signature
@@ -908,7 +833,7 @@ if uploaded_file is not None:
         fig_diff.data[1].x = diff_x
         fig_diff.data[1].y = diff_y
         fig_diff.data[1].text = diff_text
-        fig_diff.layout.xaxis.range = [plot_ranges["x_min"], plot_ranges["x_max"]]
+        fig_diff.layout.xaxis.range = [x_min, x_max]
 
         fig_total_prop.data[0].x = x_values
         fig_total_prop.data[0].y = st.session_state.y5_full.tolist()
@@ -917,7 +842,7 @@ if uploaded_file is not None:
         fig_total_prop.data[2].x = total_x
         fig_total_prop.data[2].y = total_y
         fig_total_prop.data[2].text = total_text
-        fig_total_prop.layout.xaxis.range = [plot_ranges["x_min"], plot_ranges["x_max"]]
+        fig_total_prop.layout.xaxis.range = [x_min, x_max]
 
         fig_prop_conc.data[0].x = x_values
         fig_prop_conc.data[0].y = st.session_state.calc_ppa_smooth_full.tolist()
@@ -926,12 +851,11 @@ if uploaded_file is not None:
         fig_prop_conc.data[2].x = conc_x
         fig_prop_conc.data[2].y = conc_y
         fig_prop_conc.data[2].text = conc_text
-        fig_prop_conc.layout.xaxis.range = [plot_ranges["x_min"], plot_ranges["x_max"]]
+        fig_prop_conc.layout.xaxis.range = [x_min, x_max]
 
         return st.session_state["analysis_figs"]
 
     def render_analysis_panels():
-        analysis_placeholder = st.session_state["analysis_placeholder"]
         if not st.session_state.analysis_mode:
             analysis_placeholder.empty()
             return
