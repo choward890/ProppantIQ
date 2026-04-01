@@ -106,6 +106,10 @@ def watch_param(param_key: str, new_value) -> None:
         })
     st.session_state[old_key] = new_value
 
+@st.cache_data
+def load_csv(file_bytes):
+    return pd.read_csv(io.BytesIO(file_bytes), skiprows=[1])
+
 # -------------------- Function to clear all data --------------------
 def clear_all_data():
     """
@@ -122,8 +126,8 @@ def clear_all_data():
     st.session_state["box_swap_until"] = 0.0
     st.session_state["box_swap_audio_nonce"] = 0
     st.session_state["box_swap_audio_rendered_nonce"] = 0
-    st.session_state["main_fig"] = None
-    st.session_state["main_fig_signature"] = None
+    st.session_state["live_fig"] = None
+    st.session_state["live_fig_signature"] = None
     st.session_state["analysis_fig_signature"] = None
 
     # Clear param-change events
@@ -145,13 +149,14 @@ def clear_all_data():
 
 # Sidebar
 st.sidebar.title("Settings")
+stream_locked = st.session_state.get("running", False)
 
 # 1. File Upload
 with st.sidebar.expander("1. File Upload", expanded=True):
-    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv", disabled=stream_locked)
 
 if uploaded_file is not None:
-    data = pd.read_csv(uploaded_file, skiprows=[1])  # Skip second line (units)
+    data = load_csv(uploaded_file.getvalue())
     st.sidebar.success(f"File uploaded: {uploaded_file.name}")
     columns = data.columns.tolist()
 
@@ -160,12 +165,12 @@ if uploaded_file is not None:
 
     # 2. CSV Channel Mapping
     with st.sidebar.expander("2. CSV Channel Mapping", expanded=True):
-        x_column = st.selectbox("Time ⤵️", columns, key='x_column')
-        y1_column = st.selectbox("Actual Prop Concentration ⤵️ (calculating input)", columns, key='y1_column')
-        y3_column = st.selectbox("Total Slurry Rate ⤵️", columns, key='y3_column')
-        y4_column = st.selectbox("Pressure ⤵️", columns, key='y4_column')
-        y5_column = st.selectbox("Total Proppant ⤵️", columns, key='y5_column')
-        y6_column = st.selectbox("Design Prop Concentration ⤵️", columns, key='y6_column')
+        x_column = st.selectbox("Time ⤵️", columns, key='x_column', disabled=stream_locked)
+        y1_column = st.selectbox("Actual Prop Concentration ⤵️ (calculating input)", columns, key='y1_column', disabled=stream_locked)
+        y3_column = st.selectbox("Total Slurry Rate ⤵️", columns, key='y3_column', disabled=stream_locked)
+        y4_column = st.selectbox("Pressure ⤵️", columns, key='y4_column', disabled=stream_locked)
+        y5_column = st.selectbox("Total Proppant ⤵️", columns, key='y5_column', disabled=stream_locked)
+        y6_column = st.selectbox("Design Prop Concentration ⤵️", columns, key='y6_column', disabled=stream_locked)
 
     # -------------------- Control Buttons (incl. Clear All Data) --------------------
     col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -192,7 +197,9 @@ if uploaded_file is not None:
     if 'last_fig' not in st.session_state:
         st.session_state.last_fig = None
     if 'live_fig' not in st.session_state:
-        st.session_state.live_fig = None   
+        st.session_state.live_fig = None
+    if 'live_fig_signature' not in st.session_state:
+        st.session_state.live_fig_signature = None
     if 'analysis_mode' not in st.session_state:
         st.session_state.analysis_mode = False
     if 'last_full_boxes_consumed_calc' not in st.session_state:
@@ -203,10 +210,6 @@ if uploaded_file is not None:
         st.session_state["box_swap_audio_nonce"] = 0
     if "box_swap_audio_rendered_nonce" not in st.session_state:
         st.session_state["box_swap_audio_rendered_nonce"] = 0
-    if "main_fig" not in st.session_state:
-        st.session_state["main_fig"] = None
-    if "main_fig_signature" not in st.session_state:
-        st.session_state["main_fig_signature"] = None
     if "analysis_fig_signature" not in st.session_state:
         st.session_state["analysis_fig_signature"] = None
 
@@ -240,13 +243,13 @@ if uploaded_file is not None:
 
     # 3. Simulation Parameters
     with st.sidebar.expander("3. Simulation Parameters", expanded=False):
-        delay = st.number_input("Delay (ms):", min_value=100, value=st.session_state.get('delay', 1000), step=100, key='delay')
-        index_increment = st.number_input("Index rows:", min_value=1, value=st.session_state.get('index_increment', 10), step=1, key='index_increment')
-        smoothing_window = st.number_input("Prop Smooth:", min_value=1, value=st.session_state.get('smoothing_window', 10), step=1, key='smoothing_window')
+        delay = st.number_input("Delay (ms):", min_value=250, value=st.session_state.get('delay', 1500), step=250, key='delay', disabled=stream_locked)
+        index_increment = st.number_input("Index rows:", min_value=1, value=st.session_state.get('index_increment', 10), step=1, key='index_increment', disabled=stream_locked)
+        smoothing_window = st.number_input("Prop Smooth:", min_value=1, value=st.session_state.get('smoothing_window', 10), step=1, key='smoothing_window', disabled=stream_locked)
 
-        show_csv_boxes = st.checkbox("Show Design Boxes", value=st.session_state.get('show_csv_boxes', False))
+        show_csv_boxes = st.checkbox("Show Design Boxes", value=st.session_state.get('show_csv_boxes', False), disabled=stream_locked)
         st.session_state['show_csv_boxes'] = show_csv_boxes
-        show_calc_boxes = st.checkbox("Show Calculated Boxes", value=st.session_state.get('show_calc_boxes', True))
+        show_calc_boxes = st.checkbox("Show Calculated Boxes", value=st.session_state.get('show_calc_boxes', True), disabled=stream_locked)
         st.session_state['show_calc_boxes'] = show_calc_boxes
 
     # 4. Calculation Parameters
@@ -255,7 +258,8 @@ if uploaded_file is not None:
             "Base Density:",
             min_value=0.1,
             value=st.session_state.get('base_density', 8.33),
-            key='base_density'
+            key='base_density',
+            disabled=stream_locked
         )
         watch_param('base_density', base_density_new)
 
@@ -263,23 +267,24 @@ if uploaded_file is not None:
             "Sand SG:",
             min_value=0.1,
             value=st.session_state.get('specific_gravity', 2.65),
-            key='specific_gravity'
+            key='specific_gravity',
+            disabled=stream_locked
         )
         watch_param('specific_gravity', specific_gravity_new)
 
-        ppr_new = st.number_input("PPR:", min_value=1, value=st.session_state.get('ppr', 45), key='ppr')
+        ppr_new = st.number_input("PPR:", min_value=1, value=st.session_state.get('ppr', 45), key='ppr', disabled=stream_locked)
         watch_param('ppr', ppr_new)
 
-        pt_prop_factor_new = st.number_input("PT Factor:", min_value=0.1, value=st.session_state.get('pt_prop_factor', 1.0), key='pt_prop_factor')
+        pt_prop_factor_new = st.number_input("PT Factor:", min_value=0.1, value=st.session_state.get('pt_prop_factor', 1.0), key='pt_prop_factor', disabled=stream_locked)
         watch_param('pt_prop_factor', pt_prop_factor_new)
 
-        high_cal_new = st.number_input("High Cal:", min_value=0.1, value=st.session_state.get('high_cal', 15.19), key='high_cal')
+        high_cal_new = st.number_input("High Cal:", min_value=0.1, value=st.session_state.get('high_cal', 15.19), key='high_cal', disabled=stream_locked)
         watch_param('high_cal', high_cal_new)
 
-        low_cal_new = st.number_input("Low Cal:", min_value=0.1, value=st.session_state.get('low_cal', 8.33), key='low_cal')
+        low_cal_new = st.number_input("Low Cal:", min_value=0.1, value=st.session_state.get('low_cal', 8.33), key='low_cal', disabled=stream_locked)
         watch_param('low_cal', low_cal_new)
 
-        baby_beast_new = st.number_input("Baby Beast Factor", min_value=0.1, value=st.session_state.get('baby_beast', 1.0), key='baby_beast')
+        baby_beast_new = st.number_input("Baby Beast Factor", min_value=0.1, value=st.session_state.get('baby_beast', 1.0), key='baby_beast', disabled=stream_locked)
         watch_param('baby_beast', baby_beast_new)
 
     # Local variable shortcuts
@@ -316,6 +321,7 @@ if uploaded_file is not None:
     boxes_placeholder_calc = st.empty()
     analysis_placeholder = st.empty()
     box_swap_placeholder = st.empty()
+    main_chart_container = plot_placeholder.container()
 
     # ------------------ Start/Restart/Pause/Resume/Analysis actions ------------------
     if start_button:
@@ -329,8 +335,8 @@ if uploaded_file is not None:
         st.session_state["box_swap_until"] = 0.0
         st.session_state["box_swap_audio_nonce"] = 0
         st.session_state["box_swap_audio_rendered_nonce"] = 0
-        st.session_state["main_fig"] = None
-        st.session_state["main_fig_signature"] = None
+        st.session_state["live_fig"] = None
+        st.session_state["live_fig_signature"] = None
         st.session_state["analysis_fig_signature"] = None
         st.session_state["analysis_figs"].clear()
         st.session_state["analysis_plots_created"] = False
@@ -614,13 +620,17 @@ if uploaded_file is not None:
 
         current_signature = (y3_column, y4_column, x_min, x_max, y1_max, y3_max, y4_max)
         if (
-            st.session_state.get("main_fig") is None
-            or st.session_state.get("main_fig_signature") != current_signature
+            st.session_state.get("live_fig") is None
+            or st.session_state.get("live_fig_signature") != current_signature
         ):
-            st.session_state["main_fig"] = create_main_figure()
-            st.session_state["main_fig_signature"] = current_signature
+            st.session_state["live_fig"] = build_live_figure(
+                x_min, x_max, y1_max, y3_max, y4_max,
+                calc_prop_color, y2_color, y3_color, y4_color,
+                y3_column, y4_column
+            )
+            st.session_state["live_fig_signature"] = current_signature
 
-        fig = st.session_state["main_fig"]
+        fig = st.session_state["live_fig"]
         x_values = st.session_state.x_full.tolist()
         fig.data[0].x = x_values
         fig.data[0].y = st.session_state.calc_ppa_smooth_full.tolist()
@@ -676,9 +686,11 @@ if uploaded_file is not None:
         fig = build_main_figure()
         if fig is not None:
             st.session_state.last_fig = fig
-            plot_placeholder.plotly_chart(fig, use_container_width=True, key="main_live_plot")
+            with main_chart_container:
+                st.plotly_chart(fig, use_container_width=True, key="main_live_plot")
         elif st.session_state.last_fig is not None:
-            plot_placeholder.plotly_chart(st.session_state.last_fig, use_container_width=True, key="main_live_plot")
+            with main_chart_container:
+                st.plotly_chart(st.session_state.last_fig, use_container_width=True, key="main_live_plot")
         else:
             with plot_placeholder.container():
                 st.write("Please start the simulation to see the plot and numerical values.")
